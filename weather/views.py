@@ -1,7 +1,7 @@
 import requests
 from django.shortcuts import render
 from django.conf import settings
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 
 def get_weather_icon_class(condition):
@@ -40,11 +40,12 @@ def get_bg_gradient(condition):
     return 'bg-default'
 
 
-def parse_forecast(forecast_data):
+def parse_forecast(forecast_data, tz_offset=0):
     """Group 3-hourly forecast into daily summaries."""
     days = {}
+    tz = timezone(timedelta(seconds=tz_offset)) if tz_offset else None
     for item in forecast_data.get('list', []):
-        dt = datetime.fromtimestamp(item['dt'])
+        dt = datetime.fromtimestamp(item['dt'], tz=tz)
         date_str = dt.strftime('%A, %b %d')
         date_key = dt.strftime('%Y-%m-%d')
         if date_key not in days:
@@ -102,6 +103,8 @@ def index(request):
             else:
                 weather = weather_resp.json()
                 condition = weather['weather'][0]['description']
+                tz_offset = weather.get('timezone', 0)
+                tz = timezone(timedelta(seconds=tz_offset))
 
                 current = {
                     'city': weather['name'],
@@ -120,11 +123,11 @@ def index(request):
                     'icon_url': f"https://openweathermap.org/img/wn/{weather['weather'][0]['icon']}@2x.png",
                     'icon_class': get_weather_icon_class(condition),
                     'bg_class': get_bg_gradient(condition),
-                    'sunrise': datetime.fromtimestamp(weather['sys']['sunrise']).strftime('%I:%M %p'),
-                    'sunset': datetime.fromtimestamp(weather['sys']['sunset']).strftime('%I:%M %p'),
+                    'sunrise': datetime.fromtimestamp(weather['sys']['sunrise'], tz=tz).strftime('%I:%M %p'),
+                    'sunset': datetime.fromtimestamp(weather['sys']['sunset'], tz=tz).strftime('%I:%M %p'),
                     'unit_symbol': unit_symbol,
                     'unit': unit,
-                    'local_time': datetime.now().strftime('%A, %B %d · %I:%M %p'),
+                    'local_time': datetime.now(tz=tz).strftime('%A, %B %d · %I:%M %p'),
                 }
 
                 # 5-day forecast
@@ -132,7 +135,7 @@ def index(request):
                 forecast_resp = requests.get(forecast_url, timeout=5)
                 forecast = []
                 if forecast_resp.status_code == 200:
-                    forecast = parse_forecast(forecast_resp.json())
+                    forecast = parse_forecast(forecast_resp.json(), tz_offset)
 
                 context.update({
                     'current': current,
